@@ -21,28 +21,53 @@ POSITIONS_ATT = {"forward", "striker", "centre-forward", "right winger", "left w
 # ─────────────────────────────────────────────
 
 def get(url: str) -> dict:
-    r = requests.get(url, headers=HEADERS, timeout=10)
-    r.raise_for_status()
-    return r.json()
+    try:
+        r = requests.get(url, headers=HEADERS, timeout=10)
+        r.raise_for_status()
+        return r.json()
+    except requests.exceptions.HTTPError as e:
+        print(f"  [!] API error ({e.response.status_code}): {url}")
+        return {}
+    except requests.exceptions.ConnectionError:
+        print("  [!] No internet connection or fotmob is unreachable.")
+        return {}
+    except requests.exceptions.Timeout:
+        print("  [!] Request timed out.")
+        return {}
 
 
-def search_player(name: str) -> dict | None:
+def prompt(label: str) -> str:
+    """Input with empty-string guard."""
+    while True:
+        val = input(label).strip()
+        if val:
+            return val
+        print("  [!] Input cannot be empty. Try again.")
+
+
+def search_player(name: str) -> dict:
+    if not name:
+        print("  [!] Player name is empty.")
+        return {}
     data = get(f"{BASE_URL}/search?term={requests.utils.quote(name)}")
     players = data.get("squadMember", {}).get("items", [])
     if not players:
         print(f"  [!] No player found for '{name}'")
-        return None
+        return {}
     p = players[0]
     print(f"  [✓] Found player : {p.get('name')} (id={p.get('id')}, team={p.get('teamName')})")
     return p
 
 
-def search_team(name: str) -> dict | None:
+def search_team(name: str) -> dict:
+    if not name:
+        print("  [!] Team name is empty.")
+        return {}
     data = get(f"{BASE_URL}/search?term={requests.utils.quote(name)}")
     teams = data.get("team", {}).get("items", [])
     if not teams:
         print(f"  [!] No team found for '{name}'")
-        return None
+        return {}
     t = teams[0]
     print(f"  [✓] Found team   : {t.get('name')} (id={t.get('id')})")
     return t
@@ -60,7 +85,7 @@ def fetch_match_details(match_id: int) -> dict:
     return get(f"{BASE_URL}/matchDetails?matchId={match_id}")
 
 
-def find_match_between(team1_id: int, team2_id: int) -> dict | None:
+def find_match_between(team1_id: int, team2_id: int):
     """Search today's matches and team fixtures for a match between two teams."""
     today = datetime.now().strftime("%Y%m%d")
     data = get(f"{BASE_URL}/matches?date={today}")
@@ -188,8 +213,8 @@ def enrich_player(p: dict, team_id: int) -> dict:
 
 def run_match_analysis():
     print("\n[MATCH ANALYSIS — confirmed/predicted lineup]")
-    t1_name = input("  Home team (e.g. Real Madrid): ").strip()
-    t2_name = input("  Away team (e.g. Bayern Munich): ").strip()
+    t1_name = prompt("  Home team (e.g. Real Madrid): ")
+    t2_name = prompt("  Away team (e.g. Bayern Munich): ")
 
     print("\n  Searching teams...")
     t1 = search_team(t1_name)
@@ -333,8 +358,8 @@ def run_match_analysis():
 
 def run_foul_live():
     print("\n[FOUL PROBABILITY — live fotmob data]")
-    committer_name = input("  Foul committer (e.g. Jonathan Tah): ").strip()
-    target_name    = input("  Target player  (e.g. Vinicius Jr): ").strip()
+    committer_name = prompt("  Foul committer (e.g. Jonathan Tah): ")
+    target_name    = prompt("  Target player  (e.g. Vinicius Jr): ")
 
     print("\n  Searching fotmob...")
     committer = search_player(committer_name)
@@ -350,9 +375,9 @@ def run_foul_live():
     touches      = extract_stat(t_stats, "touches", "touchesPerGame", "touches per")
 
     if fouls_per_90 == 0:
-        fouls_per_90 = float(input(f"\n  Could not find fouls/90 for {committer_name}. Enter manually: "))
+        fouls_per_90 = float(prompt(f"\n  Could not find fouls/90 for {committer_name}. Enter manually: "))
     if touches == 0:
-        touches = float(input(f"  Could not find touches/90 for {target_name}. Enter manually: "))
+        touches = float(prompt(f"  Could not find touches/90 for {target_name}. Enter manually: "))
 
     fouls_pct = min(fouls_per_90 / 3.0, 1.0) * 100.0
     prob      = calc_foul_probability(fouls_pct, touches)
@@ -372,8 +397,8 @@ def run_foul_live():
 
 def run_shot_live():
     print("\n[SHOT PROBABILITY — live fotmob data]")
-    player_name = input("  Player name      (e.g. Vinicius Jr): ").strip()
-    opp_name    = input("  Opposition team  (e.g. Bayern Munich): ").strip()
+    player_name = prompt("  Player name      (e.g. Vinicius Jr): ")
+    opp_name    = prompt("  Opposition team  (e.g. Bayern Munich): ")
 
     print("\n  Searching fotmob...")
     player   = search_player(player_name)
@@ -389,9 +414,9 @@ def run_shot_live():
     conceded = get_shots_conceded(t_stats)
 
     if shots == 0:
-        shots    = float(input(f"\n  Could not find shots/90 for {player_name}. Enter manually: "))
+        shots    = float(prompt(f"\n  Could not find shots/90 for {player_name}. Enter manually: "))
     if conceded == 0:
-        conceded = float(input(f"  Could not find shots conceded for {opp_name}. Enter manually: "))
+        conceded = float(prompt(f"  Could not find shots conceded for {opp_name}. Enter manually: "))
 
     prob = calc_shot_probability(shots, conceded)
 
@@ -411,10 +436,10 @@ def run_shot_live():
 
 def run_foul_manual():
     print("\n[FOUL PROBABILITY — manual input]")
-    committer = input("  Foul committer name: ").strip()
-    fouls_pct = float(input("  Fouls committed per match % (e.g. 68): "))
-    target    = input("  Target player name: ").strip()
-    touches   = float(input("  Target touches per 90 (e.g. 70): "))
+    committer = prompt("  Foul committer name: ")
+    fouls_pct = float(prompt("  Fouls committed per match % (e.g. 68): "))
+    target    = prompt("  Target player name: ")
+    touches   = float(prompt("  Target touches per 90 (e.g. 70): "))
     prob      = calc_foul_probability(fouls_pct, touches)
     print(f"""
 {'='*52}
@@ -431,10 +456,10 @@ def run_foul_manual():
 
 def run_shot_manual():
     print("\n[SHOT PROBABILITY — manual input]")
-    player   = input("  Player name: ").strip()
-    shots    = float(input("  Shots per 90 (e.g. 3.2): "))
-    opp      = input("  Opposition team: ").strip()
-    conceded = float(input("  Opposition shots conceded per match (e.g. 14): "))
+    player   = prompt("  Player name: ")
+    shots    = float(prompt("  Shots per 90 (e.g. 3.2): "))
+    opp      = prompt("  Opposition team: ")
+    conceded = float(prompt("  Opposition shots conceded per match (e.g. 14): "))
     prob     = calc_shot_probability(shots, conceded)
     print(f"""
 {'='*52}
